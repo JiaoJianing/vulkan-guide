@@ -77,6 +77,8 @@ public:
 
 	void draw_background(VkCommandBuffer cmd);
 
+	void draw_geometry(VkCommandBuffer cmd);
+
 	void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
 
 	//run main loop
@@ -116,6 +118,9 @@ public:
 
 	VkPipelineLayout _gradientPipelineLayout;
 
+	VkPipelineLayout _trianglePipelineLayout;
+	VkPipeline _trianglePipeline;
+
 	VkFence _immFence;
 	VkCommandBuffer _immCommandBuffer;
 	VkCommandPool _immCommandPool;
@@ -129,7 +134,8 @@ private:
 	void init_sync_structures();
 	void init_descriptors();
 	void init_pipelines();
-	void init_background_pipelines();
+	void init_background_pipeline();
+	void init_triangle_pipeline();
 
 	void init_imgui();
 
