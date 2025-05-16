@@ -599,7 +599,9 @@ void VulkanEngine::init_mesh_pipeline()
 	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
 	pipelineBuilder.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
 	pipelineBuilder.set_mulitSampling_none();
-	pipelineBuilder.disable_blending();
+	//pipelineBuilder.disable_blending();
+    //pipelineBuilder.enable_bleinding_alphaBlend();
+    pipelineBuilder.enable_blending_additive();
 	pipelineBuilder.enable_depthTest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
 
 	pipelineBuilder.set_color_attachment_format(_drawImage.imageFormat);

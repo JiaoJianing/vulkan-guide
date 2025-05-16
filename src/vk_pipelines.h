@@ -29,6 +29,8 @@ namespace vkutil {
 		void set_cull_mode(VkCullModeFlags cullMode, VkFrontFace frontFace);
 		void set_mulitSampling_none();
 		void disable_blending();
+		void enable_blending_additive();
+		void enable_bleinding_alphaBlend();
 		void set_color_attachment_format(VkFormat format);
 		void set_depth_format(VkFormat format);
 		void disable_depthTest();
