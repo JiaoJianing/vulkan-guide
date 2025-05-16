@@ -115,6 +115,8 @@ public:
 	AllocatedImage _drawImage;
 	AllocatedImage _depthImage;
 	VkExtent2D _drawExtent;
+	float _renderScale = 1.0f;
+	bool _resize_requested = false;
 
 	DescriptorAllocator globalDescriptorAllocator;
 	VkDescriptorSet _drawImageDescriptors;
@@ -150,5 +152,6 @@ private:
 	void destroy_buffer(const AllocatedBuffer& buffer);
 
 	void create_swapchain(uint32_t width, uint32_t height);
+	void resize_swapchain();
 	void destroy_swapchain();
 };
