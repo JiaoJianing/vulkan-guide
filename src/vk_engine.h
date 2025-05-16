@@ -122,12 +122,8 @@ public:
 
 	VkPipelineLayout _gradientPipelineLayout;
 
-	VkPipelineLayout _trianglePipelineLayout;
-	VkPipeline _trianglePipeline;
-
 	VkPipelineLayout _meshPipelineLayout;
 	VkPipeline _meshPipeline;
-	GPUMeshBuffers _rectangle;
 
 	std::vector<std::shared_ptr<MeshAsset>> _testMeshes;
 
@@ -146,7 +142,6 @@ private:
 	void init_default_data();
 	void init_pipelines();
 	void init_background_pipeline();
-	void init_triangle_pipeline();
 	void init_mesh_pipeline();
 
 	void init_imgui();
