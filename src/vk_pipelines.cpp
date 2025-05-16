@@ -111,6 +111,19 @@ namespace vkutil {
 		_depthStencil.maxDepthBounds = 1.0f;
 	}
 
+	void PipelineBuilder::enable_depthTest(bool depthWriteEnable, VkCompareOp op)
+	{
+		_depthStencil.depthTestEnable = VK_TRUE;
+		_depthStencil.depthWriteEnable = depthWriteEnable;
+		_depthStencil.depthCompareOp = op;
+		_depthStencil.depthBoundsTestEnable = VK_FALSE;
+		_depthStencil.stencilTestEnable = VK_FALSE;
+		_depthStencil.front = {};
+		_depthStencil.back = {};
+		_depthStencil.minDepthBounds = 0.0f;
+		_depthStencil.maxDepthBounds = 1.0f;
+	}
+
 	VkPipeline PipelineBuilder::build_pipeline(VkDevice device)
 	{
 		VkPipelineViewportStateCreateInfo viewportState = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .pNext = nullptr };

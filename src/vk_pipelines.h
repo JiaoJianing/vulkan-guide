@@ -32,6 +32,7 @@ namespace vkutil {
 		void set_color_attachment_format(VkFormat format);
 		void set_depth_format(VkFormat format);
 		void disable_depthTest();
+		void enable_depthTest(bool depthWriteEnable, VkCompareOp op);
 
 		VkPipeline build_pipeline(VkDevice device);
 	};
