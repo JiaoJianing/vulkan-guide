@@ -27,6 +27,7 @@ struct DeletionQueue
 	}
 };
 
+// 帧数据 例如可以在CPU端记录多帧的渲染命令 保持CPU和GPU都忙碌的状态
 struct FrameData
 {
 	VkCommandPool _commandPool;
@@ -36,7 +37,11 @@ struct FrameData
 	VkFence _renderFence;
 
 	DeletionQueue _deletionQueue;
+	// 用于动态分配描述符集
+	DescriptorAllocatorGrowable _frameDescriptors;
 };
+
+// 本示例使用2个帧资源 相当于CPU最多可以同时录制2帧的渲染命令
 constexpr unsigned int FRAME_OVERLAP = 2;
 
 struct ComputePushConstants
@@ -47,6 +52,7 @@ struct ComputePushConstants
 	glm::vec4 data4;
 };
 
+// 用于确定使用哪个计算着色器
 struct ComputeEffect
 {
 	const char* name;
@@ -85,8 +91,10 @@ public:
 	//run main loop
 	void run();
 
+	// 可以通过这个函数将cpu顶点上传到gpu
 	void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
 
+	// 将Mesh的顶点信息上传到gpu 在渲染阶段可以实现不绑定VertexBuffer 直接将顶点的GPU地址通过push-constant传到shader
 	GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 
 	VkInstance _instance;
@@ -110,17 +118,26 @@ public:
 
 public:
 	DeletionQueue _mainDeletionQueue;
+	// 用于分配buffer和image的显存分配器
 	VmaAllocator _allocator;
 
 	AllocatedImage _drawImage;
 	AllocatedImage _depthImage;
+	// drawImage和depthImage在本示例中不会动态重建 它们的尺寸在初始化时确定
+	// 当窗口大小变化时：若窗口比image小，drawImage只绘制窗口大小的区域；若窗口比image大，drawImage会放大
+	// drawExtent区域由窗口大小、image大小、renderScale控制
 	VkExtent2D _drawExtent;
 	float _renderScale = 1.0f;
+
+	// 窗口尺寸变化后，SwapChain需要重建
 	bool _resize_requested = false;
 
 	DescriptorAllocator globalDescriptorAllocator;
 	VkDescriptorSet _drawImageDescriptors;
 	VkDescriptorSetLayout _drawImageDescriptorLayout;
+
+	GPUSceneData _sceneData;
+	VkDescriptorSetLayout _gpuSceneDataDescriptorLayout;
 
 	VkPipelineLayout _gradientPipelineLayout;
 
@@ -133,6 +150,7 @@ public:
 	VkCommandBuffer _immCommandBuffer;
 	VkCommandPool _immCommandPool;
 
+	// 窗口背景效果取决于使用哪个计算着色器
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect{ 0 };
 private:

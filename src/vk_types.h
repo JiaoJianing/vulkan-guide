@@ -30,6 +30,7 @@
         }                                                               \
     } while (0)
 
+// 通过VMA分配的image资源
 struct AllocatedImage
 {
     VkImage image;
@@ -39,6 +40,7 @@ struct AllocatedImage
     VkFormat imageFormat;
 };
 
+// 通过VMA分配的buffer资源
 struct AllocatedBuffer
 {
     VkBuffer buffer;
@@ -66,4 +68,14 @@ struct GPUDrawPushConstants
 {
     glm::mat4 worldMatrix;
     VkDeviceAddress vertexBuffer;
+};
+
+struct GPUSceneData
+{
+	glm::mat4 view;
+	glm::mat4 proj;
+	glm::mat4 viewProj;
+	glm::vec4 ambientColor;
+	glm::vec4 sunlightDirection;
+	glm::vec4 sunlightColor;
 };
