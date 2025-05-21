@@ -97,6 +97,12 @@ public:
 	// 将Mesh的顶点信息上传到gpu 在渲染阶段可以实现不绑定VertexBuffer 直接将顶点的GPU地址通过push-constant传到shader
 	GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
 
+	// 创建/销毁纹理
+	AllocatedImage create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+	// 通过一个stagingBuffer将像素数据上传到gpu
+	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+	void destroy_image(const AllocatedImage& img);
+
 	VkInstance _instance;
 	VkDebugUtilsMessengerEXT _debug_messenger;
 	VkPhysicalDevice _chosenGPU;
@@ -132,20 +138,34 @@ public:
 	// 窗口尺寸变化后，SwapChain需要重建
 	bool _resize_requested = false;
 
+	// 计算着色器绘制背景的描述符集相关
 	DescriptorAllocator globalDescriptorAllocator;
 	VkDescriptorSet _drawImageDescriptors;
 	VkDescriptorSetLayout _drawImageDescriptorLayout;
+	// 计算着色器绘制背景的管线布局
+	VkPipelineLayout _gradientPipelineLayout;
 
+	// 场景级别的信息：如mvp矩阵、光照参数等
 	GPUSceneData _sceneData;
 	VkDescriptorSetLayout _gpuSceneDataDescriptorLayout;
 
-	VkPipelineLayout _gradientPipelineLayout;
-
+	// 绘制网格模型的管线布局
 	VkPipelineLayout _meshPipelineLayout;
 	VkPipeline _meshPipeline;
+	// 包含单图片的描述符集布局
+	VkDescriptorSetLayout _singleImageDescriptorLayout;
 
+	// 场景默认数据
 	std::vector<std::shared_ptr<MeshAsset>> _testMeshes;
+	AllocatedImage _whiteImage;
+	AllocatedImage _blackImage;
+	AllocatedImage _grayImage;
+	AllocatedImage _errorCheckerboardImage;
 
+	VkSampler _defaultSamplerLinear;
+	VkSampler _defaultSamplerNearest;
+
+	// 用于上传cpu数据到gpu
 	VkFence _immFence;
 	VkCommandBuffer _immCommandBuffer;
 	VkCommandPool _immCommandPool;

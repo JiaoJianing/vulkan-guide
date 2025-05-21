@@ -218,18 +218,26 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 	vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     // 动态分配GPUSceneData描述符集
-    AllocatedBuffer gpuSceneDataBuffer = create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-    get_current_frame()._deletionQueue.push_function([=, this]()
-        {
-            destroy_buffer(gpuSceneDataBuffer);
-        });
+    //AllocatedBuffer gpuSceneDataBuffer = create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    //get_current_frame()._deletionQueue.push_function([=, this]()
+    //    {
+    //        destroy_buffer(gpuSceneDataBuffer);
+    //    });
 
-    GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
-    *sceneUniformData = _sceneData;
-    VkDescriptorSet globalDescriptor = get_current_frame()._frameDescriptors.allocate(_device, _gpuSceneDataDescriptorLayout);
-    DescriptorWriter writer;
-    writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    writer.update_set(_device, globalDescriptor);
+    //GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
+    //*sceneUniformData = _sceneData;
+    //VkDescriptorSet globalDescriptor = get_current_frame()._frameDescriptors.allocate(_device, _gpuSceneDataDescriptorLayout);
+    //DescriptorWriter writer;
+    //writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    //writer.update_set(_device, globalDescriptor);
+
+    VkDescriptorSet imageSet = get_current_frame()._frameDescriptors.allocate(_device, _singleImageDescriptorLayout);
+    {
+        DescriptorWriter writer;
+        writer.write_image(0, _errorCheckerboardImage.imageView, _defaultSamplerNearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        writer.update_set(_device, imageSet);
+    }
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _meshPipelineLayout, 0, 1, &imageSet, 0, nullptr);
 
     GPUDrawPushConstants push_constants;
     glm::mat4 view = glm::translate(glm::vec3(0, 0, -5));
@@ -403,44 +411,23 @@ void VulkanEngine::init_swapchain()
         1
     };
 
-    // color image
-    _drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-    _drawImage.imageExtent = drawImageExtent;
-
-    VkImageUsageFlags drawImageUsages{};
-    drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	// color image
+	VkImageUsageFlags drawImageUsages{};
+	drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	drawImageUsages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	drawImageUsages |= VK_IMAGE_USAGE_STORAGE_BIT;
 	drawImageUsages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-    VkImageCreateInfo rimg_info = vkinit::image_create_info(_drawImage.imageFormat, drawImageUsages, drawImageExtent);
-    VmaAllocationCreateInfo rimg_allocInfo = {};
-    rimg_allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    rimg_allocInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    vmaCreateImage(_allocator, &rimg_info, &rimg_allocInfo, &_drawImage.image, &_drawImage.allocation, nullptr);
-
-    VkImageViewCreateInfo iview_info = vkinit::imageview_create_info(_drawImage.imageFormat, _drawImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
-    VK_CHECK(vkCreateImageView(_device, &iview_info, nullptr, &_drawImage.imageView));
+    _drawImage = create_image(drawImageExtent, VK_FORMAT_R16G16B16A16_SFLOAT, drawImageUsages, false);
 
     // depth image
-    _depthImage.imageFormat = VK_FORMAT_D32_SFLOAT;
-    _depthImage.imageExtent = drawImageExtent;
     VkImageUsageFlags depthImageUsages{};
     depthImageUsages |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-
-    VkImageCreateInfo dimg_info = vkinit::image_create_info(_depthImage.imageFormat, depthImageUsages, drawImageExtent);
-    vmaCreateImage(_allocator, &dimg_info, &rimg_allocInfo, &_depthImage.image, &_depthImage.allocation, nullptr);
-
-    VkImageViewCreateInfo dview_info = vkinit::imageview_create_info(_depthImage.imageFormat, _depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
-    VK_CHECK(vkCreateImageView(_device, &dview_info, nullptr, &_depthImage.imageView));
+    _depthImage = create_image(drawImageExtent, VK_FORMAT_D32_SFLOAT, depthImageUsages, false);
 
     _mainDeletionQueue.push_function([=]()
         {
-            vkDestroyImageView(_device, _drawImage.imageView, nullptr);
-            vmaDestroyImage(_allocator, _drawImage.image, _drawImage.allocation);
-
-            vkDestroyImageView(_device, _depthImage.imageView, nullptr);
-            vmaDestroyImage(_allocator, _depthImage.image, _depthImage.allocation);
+            destroy_image(_drawImage);
+            destroy_image(_depthImage);
         });
 }
 
@@ -481,7 +468,6 @@ void VulkanEngine::init_sync_structures()
 		VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._renderSemaphore));
     }
 
-    //imgui
     VK_CHECK(vkCreateFence(_device, &fenceCreateInfo, nullptr, &_immFence));
     _mainDeletionQueue.push_function([=]() { vkDestroyFence(_device, _immFence, nullptr); });
 }
@@ -495,28 +481,37 @@ void VulkanEngine::init_descriptors()
 
     globalDescriptorAllocator.init_pool(_device, 10, sizes);
 
-    DescriptorLayoutBuilder builder;
-    builder.add_binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-    _drawImageDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_COMPUTE_BIT);
-
+    {
+        // 计算着色器中使用，有一个可读可写的纹理
+		DescriptorLayoutBuilder builder;
+		builder.add_binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+		_drawImageDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_COMPUTE_BIT);
+    }
     _drawImageDescriptors = globalDescriptorAllocator.allocate(_device, _drawImageDescriptorLayout);
+	// 使用封装后的描述符更新工具
+	DescriptorWriter writer;
+	writer.write_image(0, _drawImage.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+	writer.update_set(_device, _drawImageDescriptors);
 
     {
+        // 包含场景信息的描述符布局
         DescriptorLayoutBuilder builder;
         builder.add_binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
         _gpuSceneDataDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
     }
-
-    // 使用封装后的描述符更新工具
-    DescriptorWriter writer;
-    writer.write_image(0, _drawImage.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-    writer.update_set(_device, _drawImageDescriptors);
+    {
+        // 包含像素着色器中采样的单图片描述符布局
+        DescriptorLayoutBuilder builder;
+        builder.add_binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        _singleImageDescriptorLayout = builder.build(_device, VK_SHADER_STAGE_FRAGMENT_BIT);
+    }
 
     _mainDeletionQueue.push_function([&]()
         {
             globalDescriptorAllocator.destroy_pool(_device);
             vkDestroyDescriptorSetLayout(_device, _drawImageDescriptorLayout, nullptr);
             vkDestroyDescriptorSetLayout(_device, _gpuSceneDataDescriptorLayout, nullptr);
+            vkDestroyDescriptorSetLayout(_device, _singleImageDescriptorLayout, nullptr);
         });
 
     //
@@ -543,6 +538,45 @@ void VulkanEngine::init_descriptors()
 void VulkanEngine::init_default_data()
 {
     _testMeshes = loadGltfMeshes(this, "../../assets/basicmesh.glb").value();
+
+    uint32_t white = glm::packUnorm4x8(glm::vec4(1, 1, 1, 1));
+    _whiteImage = create_image((void*)&white, VkExtent3D{ 1,1,1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+	uint32_t gray = glm::packUnorm4x8(glm::vec4(0.66f, 0.66f, 0.66f, 1));
+	_grayImage = create_image((void*)&gray, VkExtent3D{ 1,1,1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+    uint32_t black = glm::packUnorm4x8(glm::vec4(0, 0, 0, 0));
+	_blackImage = create_image((void*)&black, VkExtent3D{ 1,1,1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    // 品红色/黑色 checkerboard
+    uint32_t magenta = glm::packUnorm4x8(glm::vec4(1, 0, 1, 1));
+    std::array<uint32_t, 16 * 16> pixels;
+    for (int x = 0; x < 16; x++)
+    {
+        for (int y = 0; y < 16; y++)
+        {
+            pixels[y * 16 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
+        }
+    }
+    _errorCheckerboardImage = create_image(pixels.data(), VkExtent3D(16, 16, 1), VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    VkSamplerCreateInfo sampler = { .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+	sampler.magFilter = VK_FILTER_NEAREST;
+	sampler.minFilter = VK_FILTER_NEAREST;
+    vkCreateSampler(_device, &sampler, nullptr, &_defaultSamplerNearest);
+
+	sampler.magFilter = VK_FILTER_LINEAR;
+	sampler.minFilter = VK_FILTER_LINEAR;
+    vkCreateSampler(_device, &sampler, nullptr, &_defaultSamplerLinear);
+
+    _mainDeletionQueue.push_function([&]()
+        {
+			vkDestroySampler(_device, _defaultSamplerNearest, nullptr);
+			vkDestroySampler(_device, _defaultSamplerLinear, nullptr);
+
+			destroy_image(_whiteImage);
+			destroy_image(_blackImage);
+			destroy_image(_grayImage);
+			destroy_image(_errorCheckerboardImage);
+        });
 }
 
 void VulkanEngine::init_pipelines()
@@ -627,7 +661,7 @@ void VulkanEngine::init_mesh_pipeline()
 	}
 
 	VkShaderModule  triangleFragShader;
-	if (!vkutil::load_shader_module("../../shaders/colored_triangle.frag.spv", _device, &triangleFragShader))
+	if (!vkutil::load_shader_module("../../shaders/tex_image.frag.spv", _device, &triangleFragShader))
 	{
 		fmt::print("Error when building the triangle fragment shader module\n");
 	}
@@ -640,6 +674,8 @@ void VulkanEngine::init_mesh_pipeline()
 	VkPipelineLayoutCreateInfo pipeline_layout_info = vkinit::pipeline_layout_create_info();
     pipeline_layout_info.pPushConstantRanges = &bufferRange;
     pipeline_layout_info.pushConstantRangeCount = 1;
+    pipeline_layout_info.pSetLayouts = &_singleImageDescriptorLayout;
+    pipeline_layout_info.setLayoutCount = 1;
 	VK_CHECK(vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr, &_meshPipelineLayout));
 
 	vkutil::PipelineBuilder pipelineBuilder;
@@ -649,10 +685,10 @@ void VulkanEngine::init_mesh_pipeline()
 	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
 	pipelineBuilder.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
 	pipelineBuilder.set_mulitSampling_none();
-	//pipelineBuilder.disable_blending();
+	pipelineBuilder.disable_blending();
     //pipelineBuilder.enable_bleinding_alphaBlend();
-    pipelineBuilder.enable_blending_additive();
-	pipelineBuilder.enable_depthTest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
+    //pipelineBuilder.enable_blending_additive();
+	//pipelineBuilder.enable_depthTest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
 
 	pipelineBuilder.set_color_attachment_format(_drawImage.imageFormat);
 	pipelineBuilder.set_depth_format(_depthImage.imageFormat);
@@ -782,6 +818,79 @@ GPUMeshBuffers VulkanEngine::uploadMesh(std::span<uint32_t> indices, std::span<V
     destroy_buffer(staging);
 
     return newSurface;
+}
+
+AllocatedImage VulkanEngine::create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped /*= false*/)
+{
+    AllocatedImage newImage;
+    newImage.imageFormat = format;
+    newImage.imageExtent = size;
+
+    VkImageCreateInfo img_info = vkinit::image_create_info(format, usage, size);
+    if (mipmapped)
+    {
+        img_info.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1;
+    }
+
+    VmaAllocationCreateInfo allocInfo = {};
+    // 专门从显存分配
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    allocInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    VK_CHECK(vmaCreateImage(_allocator, &img_info, &allocInfo, &newImage.image, &newImage.allocation, nullptr));
+
+    VkImageAspectFlags aspectFlag = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (format == VK_FORMAT_D32_SFLOAT)
+    {
+        aspectFlag = VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+
+    VkImageViewCreateInfo view_info = vkinit::imageview_create_info(format, newImage.image, aspectFlag);
+    view_info.subresourceRange.levelCount = img_info.mipLevels;
+
+    VK_CHECK(vkCreateImageView(_device, &view_info, nullptr, &newImage.imageView));
+
+    return newImage;
+}
+
+AllocatedImage VulkanEngine::create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped /*= false*/)
+{
+    // 本示例默认认为图像都是RGBA8格式
+    size_t data_size = size.depth * size.width * size.height * 4;
+    AllocatedBuffer uploadBuffer = create_buffer(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    memcpy(uploadBuffer.info.pMappedData, data, data_size);
+
+    AllocatedImage new_image = create_image(size, format, usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, mipmapped);
+
+    immediate_submit([&](VkCommandBuffer cmd)
+        {
+            vkutil::transition_image(cmd, new_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            VkBufferImageCopy copyRegion = {};
+            copyRegion.bufferOffset = 0;
+            copyRegion.bufferRowLength = 0;
+            copyRegion.bufferImageHeight = 0;
+
+			copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			copyRegion.imageSubresource.mipLevel = 0;
+			copyRegion.imageSubresource.baseArrayLayer = 0;
+			copyRegion.imageSubresource.layerCount = 1;
+			copyRegion.imageExtent = size;
+
+            vkCmdCopyBufferToImage(cmd, uploadBuffer.buffer, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+            vkutil::transition_image(cmd, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        });
+
+    destroy_buffer(uploadBuffer);
+
+    return new_image;
+}
+
+void VulkanEngine::destroy_image(const AllocatedImage& img)
+{
+	vkDestroyImageView(_device, img.imageView, nullptr);
+	vmaDestroyImage(_allocator, img.image, img.allocation);
 }
 
 void VulkanEngine::create_swapchain(uint32_t width, uint32_t height)
