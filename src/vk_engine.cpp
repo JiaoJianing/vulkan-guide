@@ -62,8 +62,13 @@ void VulkanEngine::init()
 
     init_default_data();
 
+    std::string structurePath = { "..\\..\\assets\\structure.glb" };
+    auto structureFile = loadGltf(this, structurePath);
+    assert(structureFile.has_value());
+    _loadedScenes["structure"] = *structureFile;
+
     _mainCamera.velocity = glm::vec3(0.0f);
-    _mainCamera.position = glm::vec3(0, 0, 5);
+    _mainCamera.position = glm::vec3(30.0f, 0.0f, -85.0f);
     _mainCamera.pitch = 0;
     _mainCamera.yaw = 0;
 
@@ -75,6 +80,10 @@ void VulkanEngine::cleanup()
 {
     if (_isInitialized) {
         vkDeviceWaitIdle(_device);
+        
+        _loadedNodes.clear();
+        _loadedScenes.clear();
+
         for (int i = 0; i < FRAME_OVERLAP; i++)
         {
 			vkDestroyCommandPool(_device, _frames[i]._commandPool, nullptr);
@@ -132,6 +141,8 @@ void VulkanEngine::update_scene()
 
         _loadedNodes["Cube"]->Draw(translation * scale, _mainDrawContext);
     }
+
+    _loadedScenes["structure"]->Draw(glm::mat4(1.0f), _mainDrawContext);
 }
 
 void VulkanEngine::draw()
@@ -504,12 +515,12 @@ void VulkanEngine::init_sync_structures()
 
 void VulkanEngine::init_descriptors()
 {
-    std::vector<DescriptorAllocator::PoolSizeRatio> sizes =
+    std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> sizes =
     {
         {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1}
     };
 
-    globalDescriptorAllocator.init_pool(_device, 10, sizes);
+    globalDescriptorAllocator.init(_device, 10, sizes);
 
     {
         // 计算着色器中使用，有一个可读可写的纹理
@@ -532,7 +543,7 @@ void VulkanEngine::init_descriptors()
 
     _mainDeletionQueue.push_function([&]()
         {
-            globalDescriptorAllocator.destroy_pool(_device);
+            globalDescriptorAllocator.destroy_pools(_device);
             vkDestroyDescriptorSetLayout(_device, _drawImageDescriptorLayout, nullptr);
             vkDestroyDescriptorSetLayout(_device, _gpuSceneDataDescriptorLayout, nullptr);
         });
@@ -1017,7 +1028,7 @@ void GLTFMetallic_Roughness::clear_resources(VkDevice device)
 	vkDestroyPipeline(device, transparentPipeline.pipeline, nullptr);
 }
 
-MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocator& descriptorAllocator)
+MaterialInstance GLTFMetallic_Roughness::write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator)
 {
     MaterialInstance matData;
     matData.passType = pass;

@@ -94,7 +94,7 @@ struct GLTFMetallic_Roughness
 	void build_pipelines(VulkanEngine* engine);
 	void clear_resources(VkDevice device);
 
-	MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocator& descriptorAllocator);
+	MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocatorGrowable& descriptorAllocator);
 };
 
 // 具备网格几何体的节点
@@ -166,6 +166,10 @@ public:
 	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 	void destroy_image(const AllocatedImage& img);
 
+	// 创建/销毁缓冲区
+	AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
+	void destroy_buffer(const AllocatedBuffer& buffer);
+
 	VkInstance _instance;
 	VkDebugUtilsMessengerEXT _debug_messenger;
 	VkPhysicalDevice _chosenGPU;
@@ -202,7 +206,7 @@ public:
 	bool _resize_requested = false;
 
 	// 计算着色器绘制背景的描述符集相关
-	DescriptorAllocator globalDescriptorAllocator;
+	DescriptorAllocatorGrowable globalDescriptorAllocator;
 	VkDescriptorSet _drawImageDescriptors;
 	VkDescriptorSetLayout _drawImageDescriptorLayout;
 	// 计算着色器绘制背景的管线布局
@@ -230,6 +234,9 @@ public:
 	DrawContext _mainDrawContext;
 	std::unordered_map<std::string, std::shared_ptr<Node>> _loadedNodes;
 
+	// 存储加载的gltf场景信息
+	std::unordered_map<std::string, std::shared_ptr<LoadedGLTF>> _loadedScenes;
+
 	// 相机控制器
 	Camera _mainCamera;
 
@@ -252,9 +259,6 @@ private:
 	void init_background_pipeline();
 
 	void init_imgui();
-
-	AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
-	void destroy_buffer(const AllocatedBuffer& buffer);
 
 	void create_swapchain(uint32_t width, uint32_t height);
 	void resize_swapchain();
