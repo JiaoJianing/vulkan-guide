@@ -109,7 +109,7 @@ std::optional<std::vector<std::shared_ptr<MeshAsset>>> loadGltfMeshes(VulkanEngi
 			newmesh.surfaces.push_back(newSurface);
 		}
 
-		constexpr bool overrideColors = true;
+		constexpr bool overrideColors = false;
 		if (overrideColors)
 		{
 			for (Vertex& vtx : vertices)

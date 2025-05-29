@@ -79,3 +79,56 @@ struct GPUSceneData
 	glm::vec4 sunlightDirection;
 	glm::vec4 sunlightColor;
 };
+
+enum class MaterialPass : uint8_t
+{
+    MainColor,
+    Transparent,
+    Other
+};
+
+struct MaterialPipeline
+{
+    VkPipeline pipeline;
+    VkPipelineLayout layout;
+};
+
+struct MaterialInstance
+{
+    MaterialPipeline* pipeline;
+    VkDescriptorSet materialSet;
+    MaterialPass passType;
+};
+
+struct DrawContext;
+
+class IRenderable
+{
+    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) = 0;
+};
+
+struct Node : public IRenderable
+{
+    std::weak_ptr<Node> parent;
+    std::vector<std::shared_ptr<Node>> children;
+
+    glm::mat4 localTransform;
+    glm::mat4 worldTransform;
+
+    void refreshTransform(const glm::mat4& parentMatrix)
+    {
+        worldTransform = parentMatrix * localTransform;
+        for (auto c : children)
+        {
+            c->refreshTransform(worldTransform);
+        }
+    }
+
+    virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx)
+    {
+        for (auto c : children)
+        {
+            c->Draw(topMatrix, ctx);
+        }
+    }
+};

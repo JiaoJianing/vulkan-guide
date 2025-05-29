@@ -61,6 +61,66 @@ struct ComputeEffect
 	ComputePushConstants data;
 };
 
+// 金属度-粗糙度材质
+struct GLTFMetallic_Roughness
+{
+	MaterialPipeline opaquePipeline;
+	MaterialPipeline transparentPipeline;
+
+	// 半透明/不透明物体使用相同的描述符布局
+	VkDescriptorSetLayout materialLayout;
+
+	struct MaterialConstants
+	{
+		glm::vec4 colorFactors;
+		glm::vec4 metal_rough_factors;
+		glm::vec4 extra[14];
+	};
+
+	struct MaterialResources
+	{
+		AllocatedImage colorImage;
+		VkSampler colorSampler;
+		AllocatedImage metalRoughImage;
+		VkSampler metalRoughSampler;
+		// 存储MaterialConstants信息
+		VkBuffer dataBuffer;
+		uint32_t dataBufferOffset;
+	};
+
+	DescriptorWriter writer;
+
+	void build_pipelines(VulkanEngine* engine);
+	void clear_resources(VkDevice device);
+
+	MaterialInstance write_material(VkDevice device, MaterialPass pass, const MaterialResources& resources, DescriptorAllocator& descriptorAllocator);
+};
+
+// 具备网格几何体的节点
+struct MeshNode : public Node
+{
+	std::shared_ptr<MeshAsset> mesh;
+	// Draw会从mesh中收集需要渲染的数据到DrawContext中
+	virtual void Draw(const glm::mat4& topMatrix, DrawContext& ctx) override;
+};
+
+struct RenderObject
+{
+	uint32_t indexCount;
+	uint32_t firstIndex;
+	VkBuffer indexBuffer;
+
+	MaterialInstance* material;
+
+	glm::mat4 transform;
+	VkDeviceAddress vertexBufferAddress;
+};
+
+struct DrawContext
+{
+	std::vector<RenderObject> opaqueSurfaces;
+};
+
 class VulkanEngine {
 public:
 
@@ -78,6 +138,8 @@ public:
 
 	//shuts down the engine
 	void cleanup();
+
+	void update_scene();
 
 	//draw loop
 	void draw();
@@ -149,12 +211,6 @@ public:
 	GPUSceneData _sceneData;
 	VkDescriptorSetLayout _gpuSceneDataDescriptorLayout;
 
-	// 绘制网格模型的管线布局
-	VkPipelineLayout _meshPipelineLayout;
-	VkPipeline _meshPipeline;
-	// 包含单图片的描述符集布局
-	VkDescriptorSetLayout _singleImageDescriptorLayout;
-
 	// 场景默认数据
 	std::vector<std::shared_ptr<MeshAsset>> _testMeshes;
 	AllocatedImage _whiteImage;
@@ -164,6 +220,14 @@ public:
 
 	VkSampler _defaultSamplerLinear;
 	VkSampler _defaultSamplerNearest;
+
+	// 金属度-粗糙度材质实例
+	MaterialInstance defaultData;
+	GLTFMetallic_Roughness metalRoughMaterial;
+	
+	// 渲染上下文 包含需要渲染的数据信息
+	DrawContext mainDrawContext;
+	std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
 
 	// 用于上传cpu数据到gpu
 	VkFence _immFence;
@@ -182,7 +246,6 @@ private:
 	void init_default_data();
 	void init_pipelines();
 	void init_background_pipeline();
-	void init_mesh_pipeline();
 
 	void init_imgui();
 
