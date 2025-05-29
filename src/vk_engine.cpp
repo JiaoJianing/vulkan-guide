@@ -62,6 +62,11 @@ void VulkanEngine::init()
 
     init_default_data();
 
+    _mainCamera.velocity = glm::vec3(0.0f);
+    _mainCamera.position = glm::vec3(0, 0, 5);
+    _mainCamera.pitch = 0;
+    _mainCamera.yaw = 0;
+
     // everything went fine
     _isInitialized = true;
 }
@@ -106,15 +111,16 @@ void VulkanEngine::cleanup()
 
 void VulkanEngine::update_scene()
 {
-    mainDrawContext.opaqueSurfaces.clear();
+    _mainDrawContext.opaqueSurfaces.clear();
+    _loadedNodes["Suzanne"]->Draw(glm::mat4(1.0f), _mainDrawContext);
 
-    loadedNodes["Suzanne"]->Draw(glm::mat4(1.0f), mainDrawContext);
-
-    _sceneData.view = glm::translate(glm::vec3(0, 0, -5));
-    _sceneData.proj = glm::perspective(glm::radians(70.0f), (float)_windowExtent.width / (float)_windowExtent.height, 10000.0f, 0.1f);
-    _sceneData.proj[1][1] *= -1;
-    _sceneData.viewProj = _sceneData.proj * _sceneData.view;
-
+    _mainCamera.update();
+	glm::mat4 view = _mainCamera.getViewMatrix();
+	glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)_windowExtent.width / (float)_windowExtent.height, 10000.0f, 0.1f);
+    projection[1][1] *= -1;
+    _sceneData.view = view;
+    _sceneData.proj = projection;
+    _sceneData.viewProj = projection * view;
 	_sceneData.ambientColor = glm::vec4(0.1f);
 	_sceneData.sunlightColor = glm::vec4(1.0f);
     _sceneData.sunlightDirection = glm::vec4(0.0f, 1.0f, 0.5f, 1.0f);
@@ -124,7 +130,7 @@ void VulkanEngine::update_scene()
         glm::mat4 scale = glm::scale(glm::vec3(0.2f));
         glm::mat4 translation = glm::translate(glm::vec3(x, 1.0f, 0.0f));
 
-        loadedNodes["Cube"]->Draw(translation * scale, mainDrawContext);
+        _loadedNodes["Cube"]->Draw(translation * scale, _mainDrawContext);
     }
 }
 
@@ -256,7 +262,7 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 	writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 	writer.update_set(_device, globalDescriptor);
 
-    for (const RenderObject& draw : mainDrawContext.opaqueSurfaces)
+    for (const RenderObject& draw : _mainDrawContext.opaqueSurfaces)
     {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->pipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->layout, 0, 1, &globalDescriptor, 0, nullptr);
@@ -309,6 +315,7 @@ void VulkanEngine::run()
                 }
             }
 
+			_mainCamera.processSDLEvent(e);
             ImGui_ImplSDL2_ProcessEvent(&e);
         }
 
@@ -609,14 +616,14 @@ void VulkanEngine::init_default_data()
     materialResources.dataBuffer = materialConstants.buffer;
     materialResources.dataBufferOffset = 0;
 
-    defaultData = metalRoughMaterial.write_material(_device, MaterialPass::MainColor, materialResources, globalDescriptorAllocator);
+    _defaultData = _metalRoughMaterial.write_material(_device, MaterialPass::MainColor, materialResources, globalDescriptorAllocator);
 
     _mainDeletionQueue.push_function([=, this]()
         {
             destroy_buffer(materialConstants);
         });
 
-    // 将gltf信息拆分到loadedNodes中
+    // 将gltf信息拆分到_loadedNodes中
     for (auto& m : _testMeshes)
     {
         std::shared_ptr<MeshNode> newNode = std::make_shared<MeshNode>();
@@ -626,9 +633,9 @@ void VulkanEngine::init_default_data()
         newNode->worldTransform = glm::mat4(1.0f);
         for (auto& s : newNode->mesh->surfaces)
         {
-            s.material = std::make_shared<GLTFMaterial>(defaultData);
+            s.material = std::make_shared<GLTFMaterial>(_defaultData);
         }
-        loadedNodes[m->name] = std::move(newNode);
+        _loadedNodes[m->name] = std::move(newNode);
     }
 }
 
@@ -636,10 +643,10 @@ void VulkanEngine::init_pipelines()
 {
     init_background_pipeline();
 
-    metalRoughMaterial.build_pipelines(this);
+    _metalRoughMaterial.build_pipelines(this);
     _mainDeletionQueue.push_function([&]()
         {
-            metalRoughMaterial.clear_resources(_device);
+            _metalRoughMaterial.clear_resources(_device);
         });
 }
 

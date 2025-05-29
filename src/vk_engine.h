@@ -6,6 +6,7 @@
 #include <vk_types.h>
 #include <vk_descriptors.h>
 #include <vk_loader.h>
+#include <camera.h>
 
 struct DeletionQueue
 {
@@ -222,12 +223,15 @@ public:
 	VkSampler _defaultSamplerNearest;
 
 	// 金属度-粗糙度材质实例
-	MaterialInstance defaultData;
-	GLTFMetallic_Roughness metalRoughMaterial;
+	MaterialInstance _defaultData;
+	GLTFMetallic_Roughness _metalRoughMaterial;
 	
 	// 渲染上下文 包含需要渲染的数据信息
-	DrawContext mainDrawContext;
-	std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
+	DrawContext _mainDrawContext;
+	std::unordered_map<std::string, std::shared_ptr<Node>> _loadedNodes;
+
+	// 相机控制器
+	Camera _mainCamera;
 
 	// 用于上传cpu数据到gpu
 	VkFence _immFence;
