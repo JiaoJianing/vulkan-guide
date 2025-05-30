@@ -10,10 +10,18 @@ struct GLTFMaterial
 	MaterialInstance data;
 };
 
+struct Bounds
+{
+	glm::vec3 origin;
+	float sphereRadius;
+	glm::vec3 extents;
+};
+
 struct GeoSurface
 {
 	uint32_t startIndex;
 	uint32_t count;
+	Bounds bounds;
 	std::shared_ptr<GLTFMaterial> material;
 };
 
@@ -54,7 +62,5 @@ struct LoadedGLTF : public IRenderable
 private:
 	void ClearAll();
 };
-
-std::optional<std::vector<std::shared_ptr<MeshAsset>>> loadGltfMeshes(VulkanEngine* engine, std::filesystem::path filePath);
 
 std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::string_view filePath);

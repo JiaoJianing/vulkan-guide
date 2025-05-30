@@ -26,6 +26,44 @@ constexpr bool bUseValidationLayers = true;
 
 VulkanEngine* loadedEngine = nullptr;
 
+bool is_visible(const RenderObject& obj, const glm::mat4& viewProj)
+{
+    std::array<glm::vec3, 8> corners
+    {
+		glm::vec3(1, 1, 1),
+		glm::vec3(1, 1, -1),
+		glm::vec3(1, -1, 1),
+		glm::vec3(1, -1, -1),
+		glm::vec3(-1, 1, 1),
+		glm::vec3(-1, 1, -1),
+		glm::vec3(-1, -1, 1),
+		glm::vec3(-1, -1, -1),
+    };
+    glm::mat4 matrix = viewProj * obj.transform;
+    
+    glm::vec3 min = glm::vec3(1.5f, 1.5f, 1.5f);
+    glm::vec3 max = glm::vec3(-1.5f, -1.5f, -1.5f);
+    for (int c = 0; c < 8; c++)
+    {
+        glm::vec4 v = matrix * glm::vec4(obj.bounds.origin + (corners[c] * obj.bounds.extents), 1.0f);
+
+		v.x = v.x / v.w;
+		v.y = v.y / v.w;
+		v.z = v.z / v.w;
+        min = glm::min(glm::vec3(v.x, v.y, v.z), min);
+        max = glm::max(glm::vec3(v.x, v.y, v.z), max);
+    }
+
+    if (min.z > 1.0f || max.z < 0.0f || min.x > 1.0f || max.x < -1.0f || min.y > 1.0f || max.y < -1.0f)
+    {
+        return false;
+    }
+    else
+    {
+        return true;
+    }
+}
+
 VulkanEngine& VulkanEngine::Get() { return *loadedEngine; }
 void VulkanEngine::init()
 {
@@ -223,25 +261,35 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
     _stats.triangleCount = 0;
     auto start = std::chrono::system_clock::now();
 
+    std::vector<uint32_t> opaque_draws;
+    opaque_draws.reserve(_mainDrawContext.opaqueSurfaces.size());
+    for (uint32_t i = 0; i < _mainDrawContext.opaqueSurfaces.size(); i++)
+    {
+        if (is_visible(_mainDrawContext.opaqueSurfaces[i], _sceneData.viewProj))
+        {
+			opaque_draws.push_back(i);
+        }
+    }
+    // 对需要渲染的opaque objects按照材质、indexBuffer进行排序分组
+    // 尽量减少后续渲染时的状态绑定切换次数
+    std::sort(opaque_draws.begin(), opaque_draws.end(), [&](const auto& iA, const auto& iB)
+        {
+            const RenderObject& A = _mainDrawContext.opaqueSurfaces[iA];
+            const RenderObject& B = _mainDrawContext.opaqueSurfaces[iB];
+            if (A.material == B.material)
+            {
+                return A.indexBuffer < B.indexBuffer;
+            }
+            else
+            {
+                return A.material < B.material;
+            }
+        });
+
     VkRenderingAttachmentInfo colorAttachment = vkinit::attachment_info(_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     VkRenderingAttachmentInfo depthAttachment = vkinit::depth_attachment_info(_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
     VkRenderingInfo renderInfo = vkinit::rendering_info(_drawExtent, &colorAttachment, &depthAttachment);
     vkCmdBeginRendering(cmd, &renderInfo);
-
-	VkViewport viewport = {};
-	viewport.x = 0;
-	viewport.y = 0;
-	viewport.width = _drawExtent.width;
-	viewport.height = _drawExtent.height;
-	viewport.minDepth = 0.0f;
-	viewport.maxDepth = 1.0f;
-	vkCmdSetViewport(cmd, 0, 1, &viewport);
-	VkRect2D scissor = {};
-	scissor.offset.x = 0;
-	scissor.offset.y = 0;
-	scissor.extent.width = _drawExtent.width;
-	scissor.extent.height = _drawExtent.height;
-	vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     // 动态分配GPUSceneData描述符集
 	AllocatedBuffer gpuSceneDataBuffer = create_buffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -257,28 +305,59 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 	writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 	writer.update_set(_device, globalDescriptor);
 
-    auto draw = [&](const RenderObject& renderObject)
+    // 只有在材质、管线、indexBuffer切换时才重新绑定 这样性能更友好
+    MaterialPipeline* lastPipeline = nullptr;
+    MaterialInstance* lastMaterial = nullptr;
+    VkBuffer lastIndexBuffer = VK_NULL_HANDLE;
+    auto draw = [&](const RenderObject& r)
     {
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderObject.material->pipeline->pipeline);
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderObject.material->pipeline->layout, 0, 1, &globalDescriptor, 0, nullptr);
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderObject.material->pipeline->layout, 1, 1, &renderObject.material->materialSet, 0, nullptr);
+        if (r.material != lastMaterial)
+        {
+            lastMaterial = r.material;
+            if (r.material->pipeline != lastPipeline)
+            {
+                lastPipeline = r.material->pipeline;
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->pipeline);
+				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->layout, 0, 1, &globalDescriptor, 0, nullptr);
 
-		vkCmdBindIndexBuffer(cmd, renderObject.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+				VkViewport viewport = {};
+				viewport.x = 0;
+				viewport.y = 0;
+				viewport.width = _drawExtent.width;
+				viewport.height = _drawExtent.height;
+				viewport.minDepth = 0.0f;
+				viewport.maxDepth = 1.0f;
+				vkCmdSetViewport(cmd, 0, 1, &viewport);
+				VkRect2D scissor = {};
+				scissor.offset.x = 0;
+				scissor.offset.y = 0;
+				scissor.extent.width = _drawExtent.width;
+				scissor.extent.height = _drawExtent.height;
+				vkCmdSetScissor(cmd, 0, 1, &scissor);
+			}
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r.material->pipeline->layout, 1, 1, &r.material->materialSet, 0, nullptr);
+        }
+
+        if (r.indexBuffer != lastIndexBuffer)
+        {
+            lastIndexBuffer = r.indexBuffer;
+			vkCmdBindIndexBuffer(cmd, r.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        }
 
 		GPUDrawPushConstants pushConstants;
-		pushConstants.vertexBuffer = renderObject.vertexBufferAddress;
-		pushConstants.worldMatrix = renderObject.transform;
-		vkCmdPushConstants(cmd, renderObject.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
+		pushConstants.worldMatrix = r.transform;
+		pushConstants.vertexBuffer = r.vertexBufferAddress;
+		vkCmdPushConstants(cmd, r.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
 
-		vkCmdDrawIndexed(cmd, renderObject.indexCount, 1, renderObject.firstIndex, 0, 0);
+		vkCmdDrawIndexed(cmd, r.indexCount, 1, r.firstIndex, 0, 0);
 
         _stats.drawCallCount++;
-        _stats.triangleCount += renderObject.indexCount / 3;
+        _stats.triangleCount += r.indexCount / 3;
     };
 
-    for (auto& r : _mainDrawContext.opaqueSurfaces)
+    for (auto& r : opaque_draws)
     {
-        draw(r);
+        draw(_mainDrawContext.opaqueSurfaces[r]);
     }
     for (auto& r : _mainDrawContext.transparentSurfaces)
     {
@@ -1071,6 +1150,7 @@ void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
         def.firstIndex = s.startIndex;
         def.indexBuffer = mesh->meshBuffers.indexBuffer.buffer;
         def.material = &s.material->data;
+        def.bounds = s.bounds;
         def.transform = nodeMatrix;
         def.vertexBufferAddress = mesh->meshBuffers.vertexBufferAddress;
 
