@@ -123,6 +123,16 @@ struct DrawContext
 	std::vector<RenderObject> transparentSurfaces;
 };
 
+// 用于统计性能
+struct EngineStats
+{
+	float frameTime;
+	int triangleCount;
+	int drawCallCount;
+	float sceneUpdateTime;
+	float meshDrawTime;
+};
+
 class VulkanEngine {
 public:
 
@@ -189,6 +199,9 @@ public:
 
 	VkQueue _graphicsQueue;
 	uint32_t _graphicsQueueFamily;
+
+	// 统计性能信息
+	EngineStats _stats;
 
 public:
 	DeletionQueue _mainDeletionQueue;
