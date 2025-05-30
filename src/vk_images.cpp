@@ -5,7 +5,7 @@
 #include "stb_image.h"
 #include "vk_engine.h"
 
-void vkutil::transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout)
+void vkutil::transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout, uint32_t baseMipLevel /*= 0*/, uint32_t levelCount /*= VK_REMAINING_MIP_LEVELS*/)
 {
 	VkImageMemoryBarrier2 imageBarrier{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
 	imageBarrier.pNext = nullptr;
@@ -20,6 +20,8 @@ void vkutil::transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout 
 
 	VkImageAspectFlags aspectMask = (newLayout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 	imageBarrier.subresourceRange = vkinit::image_subresource_range(aspectMask);
+	imageBarrier.subresourceRange.baseMipLevel = baseMipLevel;
+	imageBarrier.subresourceRange.levelCount = levelCount;
 	imageBarrier.image = image;
 
 	VkDependencyInfo depInfo{};
@@ -32,7 +34,7 @@ void vkutil::transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout 
 	vkCmdPipelineBarrier2(cmd, &depInfo);
 }
 
-void vkutil::copy_image_to_image(VkCommandBuffer cmd, VkImage source, VkImage destination, VkExtent2D srcSize, VkExtent2D dstSize)
+void vkutil::copy_image_to_image(VkCommandBuffer cmd, VkImage source, VkImage destination, VkExtent2D srcSize, VkExtent2D dstSize, uint32_t srcMipLevel /*= 0*/, uint32_t dstMipLevel /*= 0*/)
 {
 	VkImageBlit2 blitRegion = { .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2, .pNext = nullptr };
 
@@ -47,12 +49,12 @@ void vkutil::copy_image_to_image(VkCommandBuffer cmd, VkImage source, VkImage de
 	blitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	blitRegion.srcSubresource.baseArrayLayer = 0;
 	blitRegion.srcSubresource.layerCount = 1;
-	blitRegion.srcSubresource.mipLevel = 0;
+	blitRegion.srcSubresource.mipLevel = srcMipLevel;
 
 	blitRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	blitRegion.dstSubresource.baseArrayLayer = 0;
 	blitRegion.dstSubresource.layerCount = 1;
-	blitRegion.dstSubresource.mipLevel = 0;
+	blitRegion.dstSubresource.mipLevel = dstMipLevel;
 
 	VkBlitImageInfo2 blitInfo{ .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2, .pNext = nullptr };
 	blitInfo.dstImage = destination;
@@ -87,7 +89,7 @@ std::optional<AllocatedImage> vkutil::load_image(VulkanEngine* engine, fastgltf:
 				imageSize.width = width;
 				imageSize.height = height;
 				imageSize.depth = 1;
-				newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+				newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, true);
 
 				stbi_image_free(data);
 			}
@@ -102,7 +104,7 @@ std::optional<AllocatedImage> vkutil::load_image(VulkanEngine* engine, fastgltf:
 				imageSize.width = width;
 				imageSize.height = height;
 				imageSize.depth = 1;
-				newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+				newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, true);
 
 				stbi_image_free(data);
 			}
@@ -125,7 +127,7 @@ std::optional<AllocatedImage> vkutil::load_image(VulkanEngine* engine, fastgltf:
 						imageSize.width = width;
 						imageSize.height = height;
 						imageSize.depth = 1;
-						newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+						newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, true);
 
 						stbi_image_free(data);
 					}
@@ -142,4 +144,26 @@ std::optional<AllocatedImage> vkutil::load_image(VulkanEngine* engine, fastgltf:
 	{
 		return newImage;
 	}
+}
+
+void vkutil::generate_mipmaps(VkCommandBuffer cmd, VkImage image, VkExtent2D imageSize)
+{
+	int mipLevels = int(std::floor(std::log2(std::max(imageSize.width, imageSize.height)))) + 1;
+	for (int mip = 0; mip < mipLevels; mip++)
+	{
+		VkExtent2D halfSize = imageSize;
+		halfSize.width /= 2;
+		halfSize.height /= 2;
+
+		transition_image(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, mip, 1);
+
+		if (mip < mipLevels - 1)
+		{
+			copy_image_to_image(cmd, image, image, imageSize, halfSize, mip, mip + 1);
+
+			imageSize = halfSize;
+		}
+	}
+
+	transition_image(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
