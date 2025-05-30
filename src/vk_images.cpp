@@ -1,6 +1,10 @@
 #include <vk_images.h>
 #include <vk_initializers.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#include "vk_engine.h"
+
 void vkutil::transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout)
 {
 	VkImageMemoryBarrier2 imageBarrier{ .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
@@ -60,4 +64,82 @@ void vkutil::copy_image_to_image(VkCommandBuffer cmd, VkImage source, VkImage de
 	blitInfo.pRegions = &blitRegion;
 
 	vkCmdBlitImage2(cmd, &blitInfo);
+}
+
+std::optional<AllocatedImage> vkutil::load_image(VulkanEngine* engine, fastgltf::Asset& asset, fastgltf::Image& image)
+{
+	AllocatedImage newImage = {};
+	int width, height, nrChannels;
+
+	std::visit(fastgltf::visitor
+		{
+			[](auto& arg) {},
+			[&](fastgltf::sources::URI& filePath)
+		{
+			assert(filePath.fileByteOffset == 0);
+			assert(filePath.uri.isLocalPath());
+
+			const std::string path(filePath.uri.path().begin(), filePath.uri.path().end());
+			unsigned char* data = stbi_load(path.c_str(), &width, &height, &nrChannels, 4);
+			if (data)
+			{
+				VkExtent3D imageSize;
+				imageSize.width = width;
+				imageSize.height = height;
+				imageSize.depth = 1;
+				newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+
+				stbi_image_free(data);
+			}
+		},
+		[&](fastgltf::sources::Vector& vector)
+		{
+			unsigned char* data = stbi_load_from_memory(vector.bytes.data(), 
+				static_cast<int>(vector.bytes.size()), &width, &height, &nrChannels, 4);
+			if (data)
+			{
+				VkExtent3D imageSize;
+				imageSize.width = width;
+				imageSize.height = height;
+				imageSize.depth = 1;
+				newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+
+				stbi_image_free(data);
+			}
+		},
+		[&](fastgltf::sources::BufferView& view)
+		{
+			auto& bufferView = asset.bufferViews[view.bufferViewIndex];
+			auto& buffer = asset.buffers[bufferView.bufferIndex];
+
+			std::visit(fastgltf::visitor
+				{
+					[](auto& arg) {},
+					[&](fastgltf::sources::Vector& vector)
+				{
+					unsigned char* data = stbi_load_from_memory(vector.bytes.data() + bufferView.byteOffset, 
+						static_cast<int>(vector.bytes.size()), &width, &height, &nrChannels, 4);
+					if (data)
+					{
+						VkExtent3D imageSize;
+						imageSize.width = width;
+						imageSize.height = height;
+						imageSize.depth = 1;
+						newImage = engine->create_image(data, imageSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, false);
+
+						stbi_image_free(data);
+					}
+				}
+				}, buffer.data);
+		}
+		}, image.data);
+
+	if (newImage.image == VK_NULL_HANDLE)
+	{
+		return {};
+	}
+	else
+	{
+		return newImage;
+	}
 }

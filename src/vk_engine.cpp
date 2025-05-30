@@ -62,16 +62,6 @@ void VulkanEngine::init()
 
     init_default_data();
 
-    std::string structurePath = { "..\\..\\assets\\structure.glb" };
-    auto structureFile = loadGltf(this, structurePath);
-    assert(structureFile.has_value());
-    _loadedScenes["structure"] = *structureFile;
-
-    _mainCamera.velocity = glm::vec3(0.0f);
-    _mainCamera.position = glm::vec3(30.0f, 0.0f, -85.0f);
-    _mainCamera.pitch = 0;
-    _mainCamera.yaw = 0;
-
     // everything went fine
     _isInitialized = true;
 }
@@ -81,7 +71,6 @@ void VulkanEngine::cleanup()
     if (_isInitialized) {
         vkDeviceWaitIdle(_device);
         
-        _loadedNodes.clear();
         _loadedScenes.clear();
 
         for (int i = 0; i < FRAME_OVERLAP; i++)
@@ -93,12 +82,6 @@ void VulkanEngine::cleanup()
 			vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);
 
             _frames[i]._deletionQueue.flush();
-        }
-
-        for (auto& mesh : _testMeshes)
-        {
-			destroy_buffer(mesh->meshBuffers.indexBuffer);
-			destroy_buffer(mesh->meshBuffers.vertexBuffer);
         }
 
         _mainDeletionQueue.flush();
@@ -120,9 +103,6 @@ void VulkanEngine::cleanup()
 
 void VulkanEngine::update_scene()
 {
-    _mainDrawContext.opaqueSurfaces.clear();
-    _loadedNodes["Suzanne"]->Draw(glm::mat4(1.0f), _mainDrawContext);
-
     _mainCamera.update();
 	glm::mat4 view = _mainCamera.getViewMatrix();
 	glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)_windowExtent.width / (float)_windowExtent.height, 10000.0f, 0.1f);
@@ -134,14 +114,8 @@ void VulkanEngine::update_scene()
 	_sceneData.sunlightColor = glm::vec4(1.0f);
     _sceneData.sunlightDirection = glm::vec4(0.0f, 1.0f, 0.5f, 1.0f);
 
-    for (int x = -3; x < 3; x++)
-    {
-        glm::mat4 scale = glm::scale(glm::vec3(0.2f));
-        glm::mat4 translation = glm::translate(glm::vec3(x, 1.0f, 0.0f));
-
-        _loadedNodes["Cube"]->Draw(translation * scale, _mainDrawContext);
-    }
-
+	_mainDrawContext.opaqueSurfaces.clear();
+    _mainDrawContext.transparentSurfaces.clear();
     _loadedScenes["structure"]->Draw(glm::mat4(1.0f), _mainDrawContext);
 }
 
@@ -273,20 +247,29 @@ void VulkanEngine::draw_geometry(VkCommandBuffer cmd)
 	writer.write_buffer(0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 	writer.update_set(_device, globalDescriptor);
 
-    for (const RenderObject& draw : _mainDrawContext.opaqueSurfaces)
+    auto draw = [&](const RenderObject& renderObject)
     {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->pipeline);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->layout, 0, 1, &globalDescriptor, 0, nullptr);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->layout, 1, 1, &draw.material->materialSet, 0, nullptr);
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderObject.material->pipeline->pipeline);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderObject.material->pipeline->layout, 0, 1, &globalDescriptor, 0, nullptr);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, renderObject.material->pipeline->layout, 1, 1, &renderObject.material->materialSet, 0, nullptr);
 
-        vkCmdBindIndexBuffer(cmd, draw.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdBindIndexBuffer(cmd, renderObject.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-        GPUDrawPushConstants pushConstants;
-        pushConstants.vertexBuffer = draw.vertexBufferAddress;
-        pushConstants.worldMatrix = draw.transform;
-        vkCmdPushConstants(cmd, draw.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
+		GPUDrawPushConstants pushConstants;
+		pushConstants.vertexBuffer = renderObject.vertexBufferAddress;
+		pushConstants.worldMatrix = renderObject.transform;
+		vkCmdPushConstants(cmd, renderObject.material->pipeline->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
 
-        vkCmdDrawIndexed(cmd, draw.indexCount, 1, draw.firstIndex, 0, 0);
+		vkCmdDrawIndexed(cmd, renderObject.indexCount, 1, renderObject.firstIndex, 0, 0);
+    };
+
+    for (auto& r : _mainDrawContext.opaqueSurfaces)
+    {
+        draw(r);
+    }
+    for (auto& r : _mainDrawContext.transparentSurfaces)
+    {
+        draw(r);
     }
 
     vkCmdEndRendering(cmd);
@@ -571,8 +554,6 @@ void VulkanEngine::init_descriptors()
 
 void VulkanEngine::init_default_data()
 {
-    _testMeshes = loadGltfMeshes(this, "../../assets/basicmesh.glb").value();
-
     uint32_t white = glm::packUnorm4x8(glm::vec4(1, 1, 1, 1));
     _whiteImage = create_image((void*)&white, VkExtent3D{ 1,1,1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
 	uint32_t gray = glm::packUnorm4x8(glm::vec4(0.66f, 0.66f, 0.66f, 1));
@@ -634,20 +615,17 @@ void VulkanEngine::init_default_data()
             destroy_buffer(materialConstants);
         });
 
-    // 将gltf信息拆分到_loadedNodes中
-    for (auto& m : _testMeshes)
-    {
-        std::shared_ptr<MeshNode> newNode = std::make_shared<MeshNode>();
-        newNode->mesh = m;
+    // 加载gltf数据
+	std::string structurePath = { "..\\..\\assets\\structure.glb" };
+	auto structureFile = loadGltf(this, structurePath);
+	assert(structureFile.has_value());
+	_loadedScenes["structure"] = *structureFile;
 
-        newNode->localTransform = glm::mat4(1.0f);
-        newNode->worldTransform = glm::mat4(1.0f);
-        for (auto& s : newNode->mesh->surfaces)
-        {
-            s.material = std::make_shared<GLTFMaterial>(_defaultData);
-        }
-        _loadedNodes[m->name] = std::move(newNode);
-    }
+    // 设置相机初始参数
+	_mainCamera.velocity = glm::vec3(0.0f);
+	_mainCamera.position = glm::vec3(30.0f, 0.0f, -85.0f);
+	_mainCamera.pitch = 0;
+	_mainCamera.yaw = 0;
 }
 
 void VulkanEngine::init_pipelines()
@@ -1066,7 +1044,14 @@ void MeshNode::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
         def.transform = nodeMatrix;
         def.vertexBufferAddress = mesh->meshBuffers.vertexBufferAddress;
 
-        ctx.opaqueSurfaces.push_back(def);
+		if (def.material->passType == MaterialPass::Transparent)
+		{
+			ctx.transparentSurfaces.push_back(def);
+		}
+		else
+		{
+			ctx.opaqueSurfaces.push_back(def);
+        }
     }
 
     Node::Draw(topMatrix, ctx);

@@ -5,6 +5,7 @@
 #include "vk_engine.h"
 #include "vk_initializers.h"
 #include "vk_types.h"
+#include "vk_images.h"
 #include <glm/gtx/quaternion.hpp>
 
 #include <fastgltf/glm_element_traits.hpp>
@@ -241,7 +242,17 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 	// 加载纹理
 	for (fastgltf::Image& image : gltf.images)
 	{
-		images.push_back(engine->_errorCheckerboardImage);
+		std::optional<AllocatedImage> img = vkutil::load_image(engine, gltf, image);
+		if (img.has_value())
+		{
+			images.push_back(*img);
+			file.images[image.name.c_str()] = *img;
+		}
+		else
+		{
+			images.push_back(engine->_errorCheckerboardImage);
+			std::cout << "gltf failed to load texture: " << image.name << std::endl;
+		}
 	}
 
 	// 创建并填充一个大的缓冲区 存储所有的材质数据
@@ -399,21 +410,25 @@ std::optional<std::shared_ptr<LoadedGLTF>> loadGltf(VulkanEngine* engine, std::s
 		nodes.push_back(newNode);
 		file.nodes[node.name.c_str()] = newNode;
 
-		std::visit(fastgltf::visitor{ [&](fastgltf::Node::TransformMatrix matrix)
-			{
-				memcpy(&newNode->localTransform, matrix.data(), sizeof(matrix));
-			},[&](fastgltf::Node::TRS transform)
-			{
-				glm::vec3 tl(transform.translation[0], transform.translation[1], transform.translation[2]);
-				glm::quat rot(transform.rotation[3], transform.rotation[0], transform.rotation[1], transform.rotation[2]);
-				glm::vec3 sc(transform.scale[0], transform.scale[1], transform.scale[2]);
+		std::visit(fastgltf::visitor
+			{ 
+				[&](fastgltf::Node::TransformMatrix matrix)
+					{
+						memcpy(&newNode->localTransform, matrix.data(), sizeof(matrix));
+					}
+				,[&](fastgltf::Node::TRS transform)
+					{
+						glm::vec3 tl(transform.translation[0], transform.translation[1], transform.translation[2]);
+						glm::quat rot(transform.rotation[3], transform.rotation[0], transform.rotation[1], transform.rotation[2]);
+						glm::vec3 sc(transform.scale[0], transform.scale[1], transform.scale[2]);
 
-				glm::mat4 tm = glm::translate(glm::mat4(1.0f), tl);
-				glm::mat4 rm = glm::toMat4(rot);
-				glm::mat4 sm = glm::scale(glm::mat4(1.0f), sc);
+						glm::mat4 tm = glm::translate(glm::mat4(1.0f), tl);
+						glm::mat4 rm = glm::toMat4(rot);
+						glm::mat4 sm = glm::scale(glm::mat4(1.0f), sc);
 
-				newNode->localTransform = tm * rm * sm;
-			} }, node.transform);
+						newNode->localTransform = tm * rm * sm;
+					}
+			}, node.transform);
 	}
 
 	// 建立节点父子关系
@@ -451,5 +466,28 @@ void LoadedGLTF::Draw(const glm::mat4& topMatrix, DrawContext& ctx)
 
 void LoadedGLTF::ClearAll()
 {
+	VkDevice dv = creator->_device;
 
+	descriptorPool.destroy_pools(dv);
+	creator->destroy_buffer(materialDataBuffer);
+
+	for (auto& [k, v] : meshes)
+	{
+		creator->destroy_buffer(v->meshBuffers.indexBuffer);
+		creator->destroy_buffer(v->meshBuffers.vertexBuffer);
+	}
+
+	for (auto& [k, v] : images)
+	{
+		if (v.image == creator->_errorCheckerboardImage.image)
+		{
+			continue;
+		}
+		creator->destroy_image(v);
+	}
+
+	for (auto& sampler : samplers)
+	{
+		vkDestroySampler(dv, sampler, nullptr);
+	}
 }

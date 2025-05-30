@@ -120,6 +120,7 @@ struct RenderObject
 struct DrawContext
 {
 	std::vector<RenderObject> opaqueSurfaces;
+	std::vector<RenderObject> transparentSurfaces;
 };
 
 class VulkanEngine {
@@ -217,11 +218,12 @@ public:
 	VkDescriptorSetLayout _gpuSceneDataDescriptorLayout;
 
 	// 场景默认数据
-	std::vector<std::shared_ptr<MeshAsset>> _testMeshes;
 	AllocatedImage _whiteImage;
 	AllocatedImage _blackImage;
 	AllocatedImage _grayImage;
 	AllocatedImage _errorCheckerboardImage;
+	// 存储加载的gltf场景信息
+	std::unordered_map<std::string, std::shared_ptr<LoadedGLTF>> _loadedScenes;
 
 	VkSampler _defaultSamplerLinear;
 	VkSampler _defaultSamplerNearest;
@@ -232,10 +234,6 @@ public:
 	
 	// 渲染上下文 包含需要渲染的数据信息
 	DrawContext _mainDrawContext;
-	std::unordered_map<std::string, std::shared_ptr<Node>> _loadedNodes;
-
-	// 存储加载的gltf场景信息
-	std::unordered_map<std::string, std::shared_ptr<LoadedGLTF>> _loadedScenes;
 
 	// 相机控制器
 	Camera _mainCamera;
